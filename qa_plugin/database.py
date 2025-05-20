@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 import logging
 import traceback
+from sqlalchemy import inspect
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -85,6 +86,19 @@ class QADatabase:
             with self.engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
                 conn.commit()
+            
+            # Check if table exists and has correct schema
+            inspector = inspect(self.engine)
+            if 'test_results' in inspector.get_table_names():
+                columns = {col['name'] for col in inspector.get_columns('test_results')}
+                required_columns = {'id', 'timestamp', 'test_type', 'test_name', 'status', 
+                                 'duration', 'error_message', 'report_path', 'is_cloud'}
+                
+                # If any required columns are missing, drop and recreate the table
+                if not required_columns.issubset(columns):
+                    logger.info("Table schema mismatch detected. Recreating table...")
+                    Base.metadata.tables['test_results'].drop(self.engine)
+                    logger.info("Dropped existing test_results table")
             
             # Create tables
             Base.metadata.create_all(self.engine)
