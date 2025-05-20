@@ -22,11 +22,16 @@ db = QADatabase()
 json_reporter = JSONReporter()
 allure_reporter = AllureReporter()
 
-# Install Playwright browsers in Streamlit Cloud
+# --- Cloud Detection and Playwright Install ---
+def is_cloud():
+    return os.environ.get("HOME", "") == "/home/appuser"
+
 def install_playwright_browsers_if_cloud():
-    if os.environ.get("STREAMLIT_CLOUD", "false").lower() == "true":
-        import subprocess
-        subprocess.run(["playwright", "install", "chromium"], check=True)
+    if is_cloud():
+        try:
+            subprocess.run(["playwright", "install", "chromium"], check=True)
+        except Exception as e:
+            print("Playwright browser install failed:", e)
 
 install_playwright_browsers_if_cloud()
 
@@ -580,28 +585,8 @@ def show_reports_page():
     
     with tab2:
         st.markdown("### Allure Reports")
-        
-        # Check if Allure is installed
-        try:
-            subprocess.run(["allure", "--version"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            st.error("❌ Allure command-line tool is not installed or not in PATH")
-            st.info("""
-            💡 To install Allure:
-            1. Install Java Runtime Environment (JRE)
-            2. Install Allure command-line tool:
-               ```bash
-               # Using Scoop (Windows)
-               scoop install allure
-               
-               # Using Homebrew (macOS)
-               brew install allure
-               
-               # Using SDKMAN (Linux/macOS)
-               sdk install allure
-               ```
-            3. Restart the application after installation
-            """)
+        if is_cloud():
+            st.info("Allure HTML reports are not available in Streamlit Cloud. Download allure-results and view locally with the Allure CLI.")
             return
         
         # Check for test results
