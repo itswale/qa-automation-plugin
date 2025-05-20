@@ -8,6 +8,16 @@ import os
 from abc import ABC, abstractmethod
 import importlib
 from .database import QADatabase
+import sys
+import logging
+import tempfile
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple
+from pathlib import Path
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class BasePlugin(ABC):
     @abstractmethod
@@ -21,17 +31,235 @@ class CustomPlugin(BasePlugin):
         return {"type": "custom", "status": "pass", "name": "custom_test"}
 
 class QACore:
-    def __init__(self, config_path="config.yaml"):
-        self.config = self.load_config(config_path)
+    """Core functionality for QA Automation Plugin."""
+    
+    def __init__(self, config_path: str = "config.yaml"):
+        """Initialize QA core with configuration."""
+        self.config_path = config_path
+        self.config = self._load_config()
+        self._setup_environment()
         self.plugins = self.load_plugins()
         self.db = QADatabase()
 
-    def load_config(self, config_path):
+    def _load_config(self) -> Dict[str, Any]:
+        """Load configuration from YAML file."""
         try:
-            with open(config_path, 'r') as f:
-                return yaml.safe_load(f)
-        except FileNotFoundError:
+            if os.path.exists(self.config_path):
+                with open(self.config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                logger.info(f"Loaded configuration from {self.config_path}")
+                return config or {}
+            else:
+                logger.warning(f"Configuration file {self.config_path} not found, using defaults")
+                return self._get_default_config()
+        except Exception as e:
+            logger.error(f"Error loading configuration: {e}")
+            return self._get_default_config()
+    
+    def _get_default_config(self) -> Dict[str, Any]:
+        """Get default configuration."""
+        return {
+            "test_dirs": {
+                "unit": "tests/unit",
+                "e2e": "tests/e2e",
+                "sample": "tests/sample"
+            },
+            "reporting": {
+                "allure": True,
+                "json": True,
+                "html": True
+            },
+            "database": {
+                "path": "qa_results.db"
+            },
+            "cloud": {
+                "enabled": os.environ.get('STREAMLIT_CLOUD', 'false').lower() == 'true',
+                "temp_dir": os.environ.get('STREAMLIT_TEMP_DIR', tempfile.gettempdir())
+            }
+        }
+    
+    def _setup_environment(self) -> None:
+        """Setup environment for test execution."""
+        try:
+            # Add test directories to Python path
+            for test_dir in self.config.get("test_dirs", {}).values():
+                if os.path.exists(test_dir):
+                    sys.path.append(os.path.abspath(test_dir))
+            
+            # Create necessary directories
+            self._create_directories()
+            
+            # Setup cloud environment if needed
+            if self.is_cloud_environment():
+                self._setup_cloud_environment()
+            
+            logger.info("Environment setup completed")
+        except Exception as e:
+            logger.error(f"Error setting up environment: {e}")
+            raise
+    
+    def _create_directories(self) -> None:
+        """Create necessary directories for test execution."""
+        try:
+            # Create test directories if they don't exist
+            for test_dir in self.config.get("test_dirs", {}).values():
+                os.makedirs(test_dir, exist_ok=True)
+            
+            # Create report directories
+            if self.config.get("reporting", {}).get("allure"):
+                os.makedirs("allure-results", exist_ok=True)
+            if self.config.get("reporting", {}).get("json"):
+                os.makedirs("reports", exist_ok=True)
+            
+            logger.info("Created necessary directories")
+        except Exception as e:
+            logger.error(f"Error creating directories: {e}")
+            raise
+    
+    def _setup_cloud_environment(self) -> None:
+        """Setup cloud-specific environment."""
+        try:
+            # Update paths for cloud environment
+            cloud_config = self.config.get("cloud", {})
+            temp_dir = cloud_config.get("temp_dir", tempfile.gettempdir())
+            
+            # Update database path
+            if "database" in self.config:
+                self.config["database"]["path"] = os.path.join(temp_dir, "qa_results.db")
+            
+            # Update report paths
+            if "reporting" in self.config:
+                reporting = self.config["reporting"]
+                if reporting.get("allure"):
+                    reporting["allure_results_dir"] = os.path.join(temp_dir, "allure-results")
+                if reporting.get("json"):
+                    reporting["json_report_dir"] = os.path.join(temp_dir, "reports")
+            
+            logger.info("Cloud environment setup completed")
+        except Exception as e:
+            logger.error(f"Error setting up cloud environment: {e}")
+            raise
+    
+    def is_cloud_environment(self) -> bool:
+        """Check if running in cloud environment."""
+        return self.config.get("cloud", {}).get("enabled", False)
+    
+    def get_test_directories(self) -> Dict[str, str]:
+        """Get test directory paths."""
+        return self.config.get("test_dirs", {})
+    
+    def get_reporting_config(self) -> Dict[str, Any]:
+        """Get reporting configuration."""
+        return self.config.get("reporting", {})
+    
+    def get_database_path(self) -> str:
+        """Get database path."""
+        return self.config.get("database", {}).get("path", "qa_results.db")
+    
+    def save_config(self) -> None:
+        """Save current configuration to file."""
+        try:
+            with open(self.config_path, 'w') as f:
+                yaml.dump(self.config, f, default_flow_style=False)
+            logger.info(f"Saved configuration to {self.config_path}")
+        except Exception as e:
+            logger.error(f"Error saving configuration: {e}")
+            raise
+    
+    def update_config(self, updates: Dict[str, Any]) -> None:
+        """Update configuration with new values."""
+        try:
+            # Deep update configuration
+            def deep_update(d: Dict[str, Any], u: Dict[str, Any]) -> Dict[str, Any]:
+                for k, v in u.items():
+                    if isinstance(v, dict) and k in d and isinstance(d[k], dict):
+                        d[k] = deep_update(d[k], v)
+                    else:
+                        d[k] = v
+                return d
+            
+            self.config = deep_update(self.config, updates)
+            self.save_config()
+            logger.info("Configuration updated successfully")
+        except Exception as e:
+            logger.error(f"Error updating configuration: {e}")
+            raise
+    
+    def get_test_files(self, test_type: str) -> List[str]:
+        """Get list of test files for a specific test type."""
+        try:
+            test_dir = self.config.get("test_dirs", {}).get(test_type)
+            if not test_dir or not os.path.exists(test_dir):
+                logger.warning(f"Test directory not found for type: {test_type}")
+                return []
+            
+            test_files = []
+            for root, _, files in os.walk(test_dir):
+                for file in files:
+                    if file.endswith(("_test.py", "test_.py", "test.py")):
+                        test_files.append(os.path.join(root, file))
+            
+            logger.info(f"Found {len(test_files)} test files for type: {test_type}")
+            return test_files
+        except Exception as e:
+            logger.error(f"Error getting test files: {e}")
+            return []
+    
+    def get_test_types(self) -> List[str]:
+        """Get list of available test types."""
+        return list(self.config.get("test_dirs", {}).keys())
+    
+    def validate_test_type(self, test_type: str) -> bool:
+        """Validate if a test type exists."""
+        return test_type in self.get_test_types()
+    
+    def get_report_paths(self, test_type: str, test_name: str) -> Dict[str, str]:
+        """Get paths for different report types."""
+        try:
+            reporting = self.config.get("reporting", {})
+            base_dir = self.config.get("cloud", {}).get("temp_dir", ".") if self.is_cloud_environment() else "."
+            
+            paths = {}
+            if reporting.get("allure"):
+                paths["allure"] = os.path.join(base_dir, "allure-results", f"{test_type}_{test_name}")
+            if reporting.get("json"):
+                paths["json"] = os.path.join(base_dir, "reports", f"{test_type}_{test_name}.json")
+            if reporting.get("html"):
+                paths["html"] = os.path.join(base_dir, "reports", f"{test_type}_{test_name}.html")
+            
+            return paths
+        except Exception as e:
+            logger.error(f"Error getting report paths: {e}")
             return {}
+    
+    def cleanup_reports(self, days: int = 30) -> None:
+        """Clean up old report files."""
+        try:
+            reporting = self.config.get("reporting", {})
+            base_dir = self.config.get("cloud", {}).get("temp_dir", ".") if self.is_cloud_environment() else "."
+            cutoff_date = datetime.now().timestamp() - (days * 24 * 60 * 60)
+            
+            for report_type in ["allure", "json", "html"]:
+                if reporting.get(report_type):
+                    report_dir = os.path.join(base_dir, f"{report_type}-results" if report_type == "allure" else "reports")
+                    if os.path.exists(report_dir):
+                        for file in os.listdir(report_dir):
+                            file_path = os.path.join(report_dir, file)
+                            if os.path.getmtime(file_path) < cutoff_date:
+                                try:
+                                    if os.path.isfile(file_path):
+                                        os.remove(file_path)
+                                    elif os.path.isdir(file_path):
+                                        import shutil
+                                        shutil.rmtree(file_path)
+                                    logger.info(f"Deleted old report: {file_path}")
+                                except Exception as e:
+                                    logger.warning(f"Error deleting report {file_path}: {e}")
+            
+            logger.info(f"Cleaned up reports older than {days} days")
+        except Exception as e:
+            logger.error(f"Error cleaning up reports: {e}")
+            raise
 
     def load_plugins(self):
         plugins = {}
