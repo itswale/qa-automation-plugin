@@ -7,7 +7,7 @@ import yaml
 from pathlib import Path
 from qa_plugin.core import QACore
 from qa_plugin.database import QADatabase, TestResult
-from qa_plugin.reports import JSONReporter, AllureReporter
+from qa_plugin.reports import JSONReporter
 from sqlalchemy import inspect
 import os
 import webbrowser
@@ -20,7 +20,6 @@ import logging
 qa_core = QACore()
 db = QADatabase()
 json_reporter = JSONReporter()
-allure_reporter = AllureReporter()
 
 # --- Cloud Detection and Playwright Install ---
 def is_cloud():
@@ -312,36 +311,8 @@ def show_run_tests():
     if test_type in ["sample", "custom"]:
         test_name = st.text_input("Test Name (optional)", help="Enter a name for your test")
     
-    # Test type descriptions with more details
-    st.markdown("""
-    **Test Type Descriptions:**
-    - **unit**: Runs pytest-based unit tests from the `/tests` directory
-      - Files must start with `test_` (e.g., `test_login.py`)
-      - Tests are discovered automatically
-      - You can select specific test files to run
-      - Example test:
-        ```python
-        def test_example():
-            assert True  # Your test here
-        ```
-    - **e2e**: Runs browser-based end-to-end tests
-      - Requires configured URLs in the Configuration tab
-      - Uses Playwright for browser automation
-      - Tests each configured URL
-      - Make sure URLs are accessible
-    - **sample**: Runs tests from the `/tests/sample` directory
-      - For demonstration and quick testing
-      - You can select specific sample tests
-      - Useful for testing the framework
-    - **custom**: Runs your custom plugin logic
-      - Uses the configured custom plugin
-      - Good for integration with other tools
-      - Configure in the Configuration tab
-    """)
-
     # Create placeholders for status messages
     status_placeholder = st.empty()
-    report_placeholder = st.empty()
     error_placeholder = st.empty()
 
     if st.button("Run Test", disabled=st.session_state.get("test_running")):
@@ -415,45 +386,17 @@ def show_run_tests():
             # Clear progress bar
             progress_placeholder.empty()
             
-            # Generate report in background
-            try:
-                results = get_results()
-                if not results:
-                    report_placeholder.warning("No test results available to generate report.")
-                    return
-                    
-                results_dicts = [{k: v for k, v in r.__dict__.items() if not k.startswith('_sa_instance_state')} for r in results]
-                report_path = allure_reporter.generate_report({"tests": results_dicts})
-                report_placeholder.success(f"📊 Report generated successfully at: {report_path}")
-                
-                # Show report buttons if tests completed successfully
-                if st.session_state.get("last_test_status", "").startswith("✅"):
-                    st.markdown("### Report Actions")
-                    st.success("✅ Test completed successfully!")
-                    st.info("""
-                    📊 To view detailed test reports:
-                    1. Go to the Reports tab in the sidebar
-                    2. You'll find comprehensive test results and Allure reports
-                    3. Use the refresh button to update the results
-                    """)
-                    
-                    # Only keep the Serve Report button
-                    if st.button("🌐 Serve Report", key="serve_report_run", use_container_width=True):
-                        try:
-                            report_path = allure_reporter.serve_report()
-                            st.success(f"Report served at: {report_path}")
-                            st.info("💡 The report will open in your default browser")
-                        except Exception as e:
-                            st.error(f"❌ Error serving report: {str(e)}")
-                            st.info("💡 Try generating a new report first")
-            except Exception as e:
-                report_placeholder.error(f"❌ Error generating report: {str(e)}")
-                error_placeholder.error("💡 Try these steps:")
-                st.markdown("""
-                1. Make sure Allure is properly installed
-                2. Check if you have test results available
-                3. Try cleaning the allure-results directory
-                4. Restart the application
+            # Update results
+            update_results_state()
+            
+            # Show success message
+            if st.session_state.get("last_test_status", "").startswith("✅"):
+                st.success("✅ Test completed successfully!")
+                st.info("""
+                📊 To view test results:
+                1. Go to the Reports tab in the sidebar
+                2. You'll find comprehensive test results
+                3. Use the refresh button to update the results
                 """)
             
         except ValueError as ve:
@@ -467,62 +410,15 @@ def show_run_tests():
             4. For custom tests: Make sure your plugin is configured
             """)
         except Exception as e:
-            error_placeholder.error(f"❌ Error running test: {str(e)}")
+            error_placeholder.error(f"❌ Test Error: {str(e)}")
             status_placeholder.error("Test execution failed")
-            st.info("💡 What to do next:")
-            if "ModuleNotFoundError" in str(e):
-                st.markdown("""
-                1. Check if all required packages are installed:
-                   ```bash
-                   pip install -r requirements.txt
-                   ```
-                2. Make sure you're in the correct virtual environment:
-                   ```bash
-                   source venv/bin/activate  # On Unix/MacOS
-                   .\\venv\\Scripts\\activate  # On Windows
-                   ```
-                3. Try running `pytest` directly to see detailed error messages:
-                   ```bash
-                   pytest tests/  # For unit tests
-                   pytest tests/sample/  # For sample tests
-                   ```
-                """)
-            elif "ImportError" in str(e):
-                st.markdown("""
-                1. Check if all test files are properly formatted:
-                   - Files should start with `test_`
-                   - Test functions should start with `test_`
-                   - Make sure all imports are correct
-                2. Example test file structure:
-                   ```python
-                   # test_example.py
-                   def test_something():
-                       assert True  # Your test here
-                   ```
-                3. Try running the test file directly:
-                   ```bash
-                   python -m pytest tests/test_example.py -v
-                   ```
-                """)
-            elif "Playwright" in str(e):
-                st.markdown("""
-                1. Make sure Playwright is installed:
-                   ```bash
-                   pip install playwright
-                   playwright install
-                   ```
-                2. Check if the URL is accessible
-                3. Verify your internet connection
-                4. Try accessing the URL in a browser
-                """)
-            else:
-                st.markdown("""
-                1. Check the error message above
-                2. Make sure all required files exist
-                3. Verify your test configuration
-                4. Try running a simpler test first
-                5. Check the logs for more details
-                """)
+            st.info("💡 Try these steps:")
+            st.markdown("""
+            1. Check the test configuration
+            2. Verify test files exist and are valid
+            3. Check test dependencies
+            4. Review error message for details
+            """)
         finally:
             st.session_state["test_running"] = False
 
@@ -537,114 +433,77 @@ def show_reports_page():
         st.query_params["page"] = "reports"
         st.rerun()
     
-    # Add tabs for different report views with consistent styling
-    tab1, tab2 = st.tabs(["📊 Latest Results", "📈 Allure Reports"])
-    
-    with tab1:
-        st.markdown("### Latest Test Results")
+    # Add action buttons
+    col1, col2 = st.columns([3, 1])
+    with col1:
         if st.button("🔄 Refresh Results", key="refresh_latest_reports", use_container_width=True):
             update_results_state()
             st.rerun()
-        
-        results = st.session_state.get("results", [])
-        if results:
-            # Convert results to DataFrame for better display
-            import pandas as pd
-            df = pd.DataFrame([{k: v for k, v in r.__dict__.items() if not k.startswith('_sa_instance_state')} for r in results])
-            
-            # Add timestamp column for sorting
-            if 'timestamp' in df.columns:
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                df = df.sort_values('timestamp', ascending=False)
-            
-            # Display the dataframe with better formatting
-            st.dataframe(
-                df,
-                use_container_width=True,
-                column_config={
-                    "timestamp": st.column_config.DatetimeColumn("Timestamp", format="D MMM, YYYY, HH:mm:ss"),
-                    "status": st.column_config.TextColumn("Status", help="Test execution status"),
-                    "test_type": st.column_config.TextColumn("Type", help="Type of test"),
-                    "name": st.column_config.TextColumn("Name", help="Test name or identifier")
-                }
-            )
-            
-            # Add summary metrics with consistent styling
-            st.markdown("### Test Summary")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Tests", len(results))
-            with col2:
-                passed = sum(1 for r in results if r.status == "pass")
-                st.metric("Passed Tests", passed, delta=f"{passed/len(results)*100:.1f}%" if results else None)
-            with col3:
-                failed = sum(1 for r in results if r.status == "fail")
-                st.metric("Failed Tests", failed, delta=f"{failed/len(results)*100:.1f}%" if results else None)
-        else:
-            st.info("No test results available yet. Run some tests to see results here.")
+    with col2:
+        if st.button("🗑️ Reset All Results", key="reset_results", use_container_width=True):
+            if st.session_state.get("confirm_reset", False):
+                db.clear_results()
+                update_results_state()
+                st.success("✅ All test results have been cleared")
+                st.session_state["confirm_reset"] = False
+                st.rerun()
+            else:
+                st.session_state["confirm_reset"] = True
+                st.warning("⚠️ Are you sure you want to delete all test results? This cannot be undone.")
+                if st.button("✅ Yes, Delete All Results", key="confirm_reset_button", use_container_width=True):
+                    db.clear_results()
+                    update_results_state()
+                    st.success("✅ All test results have been cleared")
+                    st.session_state["confirm_reset"] = False
+                    st.rerun()
     
-    with tab2:
-        st.markdown("### Allure Reports")
-        if is_cloud():
-            st.info("Allure HTML reports are not available in Streamlit Cloud. Download allure-results and view locally with the Allure CLI.")
-            return
+    results = st.session_state.get("results", [])
+    if results:
+        # Convert results to DataFrame for better display
+        import pandas as pd
+        df = pd.DataFrame([{k: v for k, v in r.__dict__.items() if not k.startswith('_sa_instance_state')} for r in results])
         
-        # Check for test results
-        if not os.path.exists("allure-results"):
-            st.info("No Allure results available. Run some tests first to generate reports.")
-            return
+        # Add timestamp column for sorting
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.sort_values('timestamp', ascending=False)
         
-        # Generate report section
-        st.markdown("#### Generate Report")
-        if st.button("📊 Generate New Allure Report", key="generate_allure_reports", use_container_width=True):
-            with st.spinner("Generating Allure report..."):
-                try:
-                    results = get_results()
-                    if not results:
-                        st.warning("No test results available to generate report.")
-                        return
-                        
-                    results_dicts = [{k: v for k, v in r.__dict__.items() if not k.startswith('_sa_instance_state')} for r in results]
-                    report_path = allure_reporter.generate_report({"tests": results_dicts})
-                    st.success(f"✅ Report generated successfully at: {report_path}")
-                except Exception as e:
-                    st.error(f"❌ Error generating report: {str(e)}")
-                    st.info("💡 Try these steps:")
-                    st.markdown("""
-                    1. Make sure Allure is properly installed
-                    2. Check if you have test results available
-                    3. Try cleaning the allure-results directory
-                    4. Restart the application
-                    """)
+        # Display the dataframe with better formatting
+        st.dataframe(
+            df,
+            use_container_width=True,
+            column_config={
+                "timestamp": st.column_config.DatetimeColumn("Timestamp", format="D MMM, YYYY, HH:mm:ss"),
+                "status": st.column_config.TextColumn("Status", help="Test execution status"),
+                "test_type": st.column_config.TextColumn("Type", help="Type of test"),
+                "name": st.column_config.TextColumn("Name", help="Test name or identifier")
+            }
+        )
         
-        # Report actions section
-        st.markdown("#### Report Actions")
-        col1, col2 = st.columns(2)
-        
+        # Add summary metrics with consistent styling
+        st.markdown("### Test Summary")
+        col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("📋 Open Latest Report", key="view_report_reports", use_container_width=True):
-                try:
-                    allure_reporter.open_report()
-                    st.success("✅ Report opened successfully")
-                except Exception as e:
-                    st.error(f"❌ Error opening report: {str(e)}")
-                    st.info("💡 Make sure to generate a report first")
-        
+            st.metric("Total Tests", len(results))
         with col2:
-            if st.button("🌐 Serve Report", key="serve_report_reports", use_container_width=True):
-                try:
-                    if allure_reporter.serve_report():
-                        st.success("✅ Report server started successfully")
-                        st.info("💡 The report will open in your default browser")
-                except Exception as e:
-                    st.error(f"❌ Error serving report: {str(e)}")
-                    st.info("💡 Try these steps:")
-                    st.markdown("""
-                    1. Make sure no other Allure server is running
-                    2. Generate a new report first
-                    3. Check if port 8080 is available
-                    4. Try restarting the application
-                    """)
+            passed = sum(1 for r in results if r.status == "pass")
+            st.metric("Passed Tests", passed, delta=f"{passed/len(results)*100:.1f}%" if results else None)
+        with col3:
+            failed = sum(1 for r in results if r.status == "fail")
+            st.metric("Failed Tests", failed, delta=f"{failed/len(results)*100:.1f}%" if results else None)
+        
+        # Add export button
+        if st.button("📥 Export Results", key="export_results", use_container_width=True):
+            csv = df.to_csv(index=False)
+            st.download_button(
+                "Download CSV",
+                csv,
+                "test_results.csv",
+                "text/csv",
+                key="download_csv"
+            )
+    else:
+        st.info("No test results available yet. Run some tests to see results here.")
 
 # --- Configuration ---
 def show_configuration():
@@ -760,7 +619,7 @@ def show_history_page():
         
         if results:
             # Get test summary
-            summary = db.get_test_summary()
+            summary = db.get_statistics()
             
             # Display summary metrics
             st.markdown("### Summary")
@@ -773,12 +632,16 @@ def show_history_page():
             with col3:
                 st.metric("Failed", summary["failed"])
             with col4:
-                st.metric("Pass Rate", f"{summary['pass_rate']:.1f}%")
+                st.metric("Skipped", summary["skipped"])
+            
+            # Get test type distribution
+            test_types = set(r.test_type for r in results)
+            type_counts = {t: len([r for r in results if r.test_type == t]) for t in test_types}
             
             # Display test type distribution
             st.markdown("### Test Distribution")
-            type_cols = st.columns(len(summary["by_type"]))
-            for (test_type, count), col in zip(summary["by_type"].items(), type_cols):
+            type_cols = st.columns(len(type_counts))
+            for (test_type, count), col in zip(type_counts.items(), type_cols):
                 with col:
                     st.metric(test_type.title(), count)
             

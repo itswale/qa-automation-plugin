@@ -65,7 +65,6 @@ class QACore:
                 "sample": "tests/sample"
             },
             "reporting": {
-                "allure": True,
                 "json": True,
                 "html": True
             },
@@ -106,8 +105,6 @@ class QACore:
                 os.makedirs(test_dir, exist_ok=True)
             
             # Create report directories
-            if self.config.get("reporting", {}).get("allure"):
-                os.makedirs("allure-results", exist_ok=True)
             if self.config.get("reporting", {}).get("json"):
                 os.makedirs("reports", exist_ok=True)
             
@@ -130,8 +127,6 @@ class QACore:
             # Update report paths
             if "reporting" in self.config:
                 reporting = self.config["reporting"]
-                if reporting.get("allure"):
-                    reporting["allure_results_dir"] = os.path.join(temp_dir, "allure-results")
                 if reporting.get("json"):
                     reporting["json_report_dir"] = os.path.join(temp_dir, "reports")
             
@@ -220,8 +215,6 @@ class QACore:
             base_dir = self.config.get("cloud", {}).get("temp_dir", ".") if self.is_cloud_environment() else "."
             
             paths = {}
-            if reporting.get("allure"):
-                paths["allure"] = os.path.join(base_dir, "allure-results", f"{test_type}_{test_name}")
             if reporting.get("json"):
                 paths["json"] = os.path.join(base_dir, "reports", f"{test_type}_{test_name}.json")
             if reporting.get("html"):
@@ -239,9 +232,9 @@ class QACore:
             base_dir = self.config.get("cloud", {}).get("temp_dir", ".") if self.is_cloud_environment() else "."
             cutoff_date = datetime.now().timestamp() - (days * 24 * 60 * 60)
             
-            for report_type in ["allure", "json", "html"]:
+            for report_type in ["json", "html"]:
                 if reporting.get(report_type):
-                    report_dir = os.path.join(base_dir, f"{report_type}-results" if report_type == "allure" else "reports")
+                    report_dir = os.path.join(base_dir, "reports")
                     if os.path.exists(report_dir):
                         for file in os.listdir(report_dir):
                             file_path = os.path.join(report_dir, file)
@@ -285,23 +278,23 @@ class QACore:
                     results.extend(self.run_pytest(test_file, is_sample=True))
                 else:
                     result = {"type": "sample", "status": "pass", "name": test_name or "sample_test"}
-                    self.db.save_result(test_type="sample", status="pass", name=test_name or "sample_test")
+                    self.db.add_result(test_type="sample", status="pass", test_name=test_name or "sample_test", duration=0.0)
                     results.append(result)
             elif test_type == "custom":
                 if "custom" in self.plugins:
                     result = self.plugins["custom"].run(self.config)
-                    self.db.save_result(test_type="custom", status=result.get("status", "fail"), name=test_name or "custom_test")
+                    self.db.add_result(test_type="custom", status=result.get("status", "fail"), test_name=test_name or "custom_test", duration=0.0)
                     results.append(result)
                 else:
                     result = {"type": "custom", "status": "fail", "name": test_name or "custom_test", 
                             "error": "No custom plugin configured"}
-                    self.db.save_result(test_type="custom", status="fail", name=test_name or "custom_test")
+                    self.db.add_result(test_type="custom", status="fail", test_name=test_name or "custom_test", duration=0.0)
                     results.append(result)
             return results
         except Exception as e:
             error_result = {"type": test_type, "status": "fail", "name": test_file or test_name or test_type,
                           "error": str(e)}
-            self.db.save_result(test_type=test_type, status="fail", name=test_file or test_name or test_type)
+            self.db.add_result(test_type=test_type, status="fail", test_name=test_file or test_name or test_type, duration=0.0)
             return [error_result]
 
     def run_pytest(self, test_file=None, is_sample=False):
@@ -317,7 +310,7 @@ class QACore:
             if not os.path.exists(test_path):
                 error_result = {"type": "unit", "status": "fail", "name": test_file,
                               "error": f"Test file not found: {test_path}"}
-                self.db.save_result(test_type="unit", status="fail", name=test_file)
+                self.db.add_result(test_type="unit", status="fail", test_name=test_file, duration=0.0)
                 return [error_result]
             args = [test_path] + args
         else:
@@ -326,12 +319,12 @@ class QACore:
         try:
             exit_code = pytest.main(args)
             status = "pass" if exit_code == 0 else "fail"
-            self.db.save_result(test_type="unit", status=status, name=test_file or "all_unit_tests")
+            self.db.add_result(test_type="unit", status=status, test_name=test_file or "all_unit_tests", duration=0.0)
             return [{"type": "unit", "status": status, "name": test_file or "all_unit_tests"}]
         except Exception as e:
             error_result = {"type": "unit", "status": "fail", "name": test_file or "all_unit_tests",
                           "error": str(e)}
-            self.db.save_result(test_type="unit", status="fail", name=test_file or "all_unit_tests")
+            self.db.add_result(test_type="unit", status="fail", test_name=test_file or "all_unit_tests", duration=0.0)
             return [error_result]
 
     def run_playwright(self, url=None):
@@ -346,17 +339,17 @@ class QACore:
                     try:
                         page.goto(test_url)
                         result = {"type": "e2e", "url": test_url, "status": "pass"}
-                        self.db.save_result(test_type="e2e", status="pass", name=test_url)
+                        self.db.add_result(test_type="e2e", status="pass", test_name=test_url, duration=0.0)
                         results.append(result)
                     except Exception as e:
                         result = {"type": "e2e", "url": test_url, "status": "fail",
                                 "error": str(e)}
-                        self.db.save_result(test_type="e2e", status="fail", name=test_url)
+                        self.db.add_result(test_type="e2e", status="fail", test_name=test_url, duration=0.0)
                         results.append(result)
                 browser.close()
             return results
         except Exception as e:
             error_result = {"type": "e2e", "status": "fail", "url": url or "all_urls",
                           "error": f"Playwright error: {str(e)}"}
-            self.db.save_result(test_type="e2e", status="fail", name=url or "all_urls")
+            self.db.add_result(test_type="e2e", status="fail", test_name=url or "all_urls", duration=0.0)
             return [error_result]
