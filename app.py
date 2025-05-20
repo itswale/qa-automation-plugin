@@ -53,7 +53,60 @@ def setup_logging():
 # Initialize logger
 logger = setup_logging()
 
-# Initialize components
+# --- Cloud Detection and Environment Functions ---
+def is_cloud():
+    """Check if running in Streamlit Cloud environment."""
+    try:
+        # Log all environment variables for debugging
+        logger.debug("Environment variables:")
+        for var in ['STREAMLIT_SERVER_PORT', 'STREAMLIT_SERVER_HEADLESS', 
+                   'STREAMLIT_SERVER_ENABLE_STATIC_SERVING', 'HOME', 
+                   'STREAMLIT_CLOUD']:
+            logger.debug(f"{var}: {os.getenv(var)}")
+        
+        # Check for Streamlit Cloud specific environment variables
+        cloud_env_vars = ['STREAMLIT_SERVER_PORT', 'STREAMLIT_SERVER_HEADLESS', 
+                         'STREAMLIT_SERVER_ENABLE_STATIC_SERVING']
+        is_cloud_env = any(os.getenv(var) for var in cloud_env_vars)
+        logger.info(f"Cloud environment detected: {is_cloud_env}")
+        return is_cloud_env
+    except Exception as e:
+        logger.error(f"Error checking cloud environment: {str(e)}\n{traceback.format_exc()}")
+        return False
+
+def get_database_path():
+    """Get appropriate database path based on environment."""
+    try:
+        if is_cloud():
+            # In cloud environment, use a path in the temporary directory
+            temp_dir = tempfile.gettempdir()
+            logger.debug(f"Using temp directory: {temp_dir}")
+            db_path = os.path.join(temp_dir, 'qa_results.db')
+            logger.info(f"Using cloud database path: {db_path}")
+            
+            # Verify directory permissions
+            if not os.access(temp_dir, os.W_OK):
+                logger.error(f"Temp directory is not writable: {temp_dir}")
+                raise PermissionError(f"Temp directory is not writable: {temp_dir}")
+        else:
+            # In local environment, use a path in the project directory
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'qa_results.db')
+            logger.info(f"Using local database path: {db_path}")
+            
+            # Ensure directory exists and is writable
+            db_dir = os.path.dirname(db_path)
+            os.makedirs(db_dir, exist_ok=True)
+            if not os.access(db_dir, os.W_OK):
+                logger.error(f"Database directory is not writable: {db_dir}")
+                raise PermissionError(f"Database directory is not writable: {db_dir}")
+        
+        return db_path
+    except Exception as e:
+        logger.error(f"Error getting database path: {str(e)}\n{traceback.format_exc()}")
+        # Fallback to a default path
+        return 'qa_results.db'
+
+# Initialize components with proper error handling
 try:
     logger.info("Starting application initialization...")
     
@@ -89,26 +142,6 @@ except Exception as e:
     st.stop()
 
 # --- Cloud Detection and Playwright Install ---
-def is_cloud():
-    """Check if running in Streamlit Cloud environment."""
-    try:
-        # Log all environment variables for debugging
-        logger.debug("Environment variables:")
-        for var in ['STREAMLIT_SERVER_PORT', 'STREAMLIT_SERVER_HEADLESS', 
-                   'STREAMLIT_SERVER_ENABLE_STATIC_SERVING', 'HOME', 
-                   'STREAMLIT_CLOUD']:
-            logger.debug(f"{var}: {os.getenv(var)}")
-        
-        # Check for Streamlit Cloud specific environment variables
-        cloud_env_vars = ['STREAMLIT_SERVER_PORT', 'STREAMLIT_SERVER_HEADLESS', 
-                         'STREAMLIT_SERVER_ENABLE_STATIC_SERVING']
-        is_cloud_env = any(os.getenv(var) for var in cloud_env_vars)
-        logger.info(f"Cloud environment detected: {is_cloud_env}")
-        return is_cloud_env
-    except Exception as e:
-        logger.error(f"Error checking cloud environment: {str(e)}\n{traceback.format_exc()}")
-        return False
-
 def install_playwright_browsers_if_cloud():
     if is_cloud():
         try:
@@ -151,42 +184,6 @@ def navigate_to(page, params=None):
             query_string = "&".join(f"{k}={v}" for k, v in params.items())
             url = f"{url}?{query_string}"
         webbrowser.open(url)
-
-# --- Database Configuration ---
-def get_database_path():
-    """Get appropriate database path based on environment."""
-    try:
-        if is_cloud():
-            # In cloud environment, use a path in the temporary directory
-            temp_dir = tempfile.gettempdir()
-            logger.debug(f"Using temp directory: {temp_dir}")
-            db_path = os.path.join(temp_dir, 'qa_results.db')
-            logger.info(f"Using cloud database path: {db_path}")
-            
-            # Verify directory permissions
-            if not os.access(temp_dir, os.W_OK):
-                logger.error(f"Temp directory is not writable: {temp_dir}")
-                raise PermissionError(f"Temp directory is not writable: {temp_dir}")
-        else:
-            # In local environment, use a path in the project directory
-            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'qa_results.db')
-            logger.info(f"Using local database path: {db_path}")
-            
-            # Ensure directory exists and is writable
-            db_dir = os.path.dirname(db_path)
-            os.makedirs(db_dir, exist_ok=True)
-            if not os.access(db_dir, os.W_OK):
-                logger.error(f"Database directory is not writable: {db_dir}")
-                raise PermissionError(f"Database directory is not writable: {db_dir}")
-        
-        return db_path
-    except Exception as e:
-        logger.error(f"Error getting database path: {str(e)}\n{traceback.format_exc()}")
-        # Fallback to a default path
-        return 'qa_results.db'
-
-# Update database path
-db.db_path = get_database_path()
 
 # --- Config Helpers ---
 def load_config():
