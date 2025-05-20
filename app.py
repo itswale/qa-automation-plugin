@@ -21,55 +21,78 @@ db = QADatabase()
 json_reporter = JSONReporter()
 allure_reporter = AllureReporter()
 
-# --- Navigation Helpers ---
+# Install Playwright browsers in Streamlit Cloud
+def install_playwright_browsers_if_cloud():
+    if os.environ.get("STREAMLIT_CLOUD", "false").lower() == "true":
+        import subprocess
+        subprocess.run(["playwright", "install", "chromium"], check=True)
+
+install_playwright_browsers_if_cloud()
+
+# --- Environment Configuration ---
+def is_cloud_environment():
+    """Check if running in Streamlit Cloud."""
+    return os.environ.get('STREAMLIT_CLOUD', 'false').lower() == 'true'
+
 def get_base_url():
     """Get the base URL for the Streamlit app."""
+    if is_cloud_environment():
+        # In cloud, we don't need to open browser windows
+        return None
     return f"http://localhost:{st.get_option('server.port')}"
 
 def navigate_to(page, params=None):
     """Navigate to a specific page with optional parameters."""
+    if is_cloud_environment():
+        # In cloud, just update the query parameters
+        st.query_params["page"] = page
+        if params:
+            for key, value in params.items():
+                st.query_params[key] = value
+        st.rerun()
+        return
+    
+    # Local environment navigation
     base_url = get_base_url()
-    url = urljoin(base_url, page)
-    if params:
-        query_string = "&".join(f"{k}={v}" for k, v in params.items())
-        url = f"{url}?{query_string}"
-    webbrowser.open(url)
+    if base_url:
+        url = urljoin(base_url, page)
+        if params:
+            query_string = "&".join(f"{k}={v}" for k, v in params.items())
+            url = f"{url}?{query_string}"
+        webbrowser.open(url)
 
-def handle_navigation():
-    """Handle navigation based on query parameters."""
-    if "page" in st.query_params:
-        page = st.query_params["page"]
-        if page == "reports":
-            show_reports_page()
-            return True
-        elif page == "history":
-            show_history_page()
-            return True
-    return False
+# --- Database Configuration ---
+def get_database_path():
+    """Get the appropriate database path based on environment."""
+    if is_cloud_environment():
+        # In cloud, use a temporary directory
+        return os.path.join(os.environ.get('STREAMLIT_TEMP_DIR', '/tmp'), 'qa_results.db')
+    return 'qa_results.db'
 
-# --- Session State Helpers ---
-def get_results():
-    session = db.Session()
-    results = session.query(TestResult).order_by(TestResult.timestamp.desc()).all()
-    session.close()
-    return results
-
-def update_results_state():
-    """Update the results in session state from the database."""
-    try:
-        results = db.get_results()
-        st.session_state["results"] = results
-        st.session_state["last_update"] = datetime.now()
-    except Exception as e:
-        st.error(f"Error updating results: {str(e)}")
+# Update database path
+db.db_path = get_database_path()
 
 # --- Config Helpers ---
 def load_config():
+    """Load configuration with cloud environment awareness."""
     config_path = Path("config.yaml")
     if config_path.exists():
         with open(config_path) as f:
-            return yaml.safe_load(f)
-    return {}
+            config = yaml.safe_load(f)
+    else:
+        config = {}
+    
+    # Add cloud-specific configuration
+    if is_cloud_environment():
+        config['cloud'] = True
+        config['database_path'] = get_database_path()
+        config['reports_dir'] = os.path.join(os.environ.get('STREAMLIT_TEMP_DIR', '/tmp'), 'reports')
+    else:
+        config['cloud'] = False
+        config['database_path'] = 'qa_results.db'
+        config['reports_dir'] = 'reports'
+    
+    return config
 
 def save_config(config):
     with open("config.yaml", "w") as f:
@@ -85,6 +108,10 @@ def main():
         initial_sidebar_state="expanded"
     )
     
+    # Add cloud environment indicator
+    if is_cloud_environment():
+        st.sidebar.info("🌐 Running in Streamlit Cloud")
+    
     st.title("QA Automation Dashboard")
     
     # Initialize session state
@@ -98,6 +125,8 @@ def main():
         st.session_state["serve_report"] = False
     if "current_page" not in st.session_state:
         st.session_state["current_page"] = "run"
+    if "cloud_environment" not in st.session_state:
+        st.session_state["cloud_environment"] = is_cloud_environment()
 
     # Sidebar - Always show this
     with st.sidebar:
