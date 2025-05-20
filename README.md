@@ -15,7 +15,7 @@ A powerful QA automation tool built with Streamlit, designed to simplify test ex
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/qa-automation-plugin.git
+git clone https://github.com/itswale/qa-automation-plugin.git
 cd qa-automation-plugin
 ```
 
