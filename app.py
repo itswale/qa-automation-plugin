@@ -15,28 +15,64 @@ from urllib.parse import urljoin
 import subprocess
 from datetime import datetime
 import logging
+import sys
+import tempfile
+
+# Configure logging first, before any other operations
+def setup_logging():
+    """Configure logging with proper error handling."""
+    try:
+        # Create logs directory if it doesn't exist
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # Configure logging
+        log_file = os.path.join(log_dir, 'app.log')
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        return logging.getLogger(__name__)
+    except Exception as e:
+        # Fallback to basic logging if setup fails
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[logging.StreamHandler(sys.stdout)]
+        )
+        logging.error(f"Failed to setup file logging: {str(e)}")
+        return logging.getLogger(__name__)
+
+# Initialize logger
+logger = setup_logging()
 
 # Initialize components
 try:
-    # Get database path based on environment
+    logger.info("Initializing application components...")
     db_path = get_database_path()
-    logger.info(f"Initializing database at: {db_path}")
-    
-    # Initialize components with proper error handling
-    qa_core = QACore()
     db = QADatabase(db_path=db_path)
-    json_reporter = JSONReporter()
-    
-    # Log successful initialization
-    logger.info("Successfully initialized all components")
+    core = QACore(db=db)
+    reporter = JSONReporter()
+    logger.info("Application components initialized successfully")
 except Exception as e:
     logger.error(f"Error during initialization: {str(e)}")
-    st.error(f"Application initialization failed: {str(e)}")
+    st.error("Failed to initialize application. Please check the logs for details.")
     st.stop()
 
 # --- Cloud Detection and Playwright Install ---
 def is_cloud():
-    return os.environ.get("HOME", "") == "/home/appuser" or os.environ.get('STREAMLIT_CLOUD', 'false').lower() == 'true'
+    """Check if running in Streamlit Cloud environment."""
+    try:
+        # Check for Streamlit Cloud specific environment variables
+        cloud_env_vars = ['STREAMLIT_SERVER_PORT', 'STREAMLIT_SERVER_HEADLESS', 'STREAMLIT_SERVER_ENABLE_STATIC_SERVING']
+        return any(os.getenv(var) for var in cloud_env_vars)
+    except Exception as e:
+        logger.warning(f"Error checking cloud environment: {str(e)}")
+        return False
 
 def install_playwright_browsers_if_cloud():
     if is_cloud():
@@ -83,24 +119,22 @@ def navigate_to(page, params=None):
 
 # --- Database Configuration ---
 def get_database_path():
-    """Get the appropriate database path based on environment."""
+    """Get appropriate database path based on environment."""
     try:
-        if is_cloud_environment():
-            # In cloud, use a temporary directory
-            temp_dir = os.environ.get('STREAMLIT_TEMP_DIR', '/tmp')
+        if is_cloud():
+            # In cloud environment, use a path in the temporary directory
+            temp_dir = tempfile.gettempdir()
             db_path = os.path.join(temp_dir, 'qa_results.db')
             logger.info(f"Using cloud database path: {db_path}")
-            
-            # Ensure the directory exists and is writable
-            os.makedirs(os.path.dirname(db_path), exist_ok=True)
-            if not os.access(os.path.dirname(db_path), os.W_OK):
-                raise PermissionError(f"Database directory is not writable: {os.path.dirname(db_path)}")
-            
-            return db_path
-        return 'qa_results.db'
+        else:
+            # In local environment, use a path in the project directory
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'qa_results.db')
+            logger.info(f"Using local database path: {db_path}")
+        return db_path
     except Exception as e:
         logger.error(f"Error getting database path: {str(e)}")
-        raise
+        # Fallback to a default path
+        return 'qa_results.db'
 
 # Update database path
 db.db_path = get_database_path()
@@ -366,7 +400,7 @@ def show_run_tests():
                 progress_bar.progress(0.25)  # 25% progress
                 for i, test_file in enumerate(selected_tests):
                     status_placeholder.info(f"🔄 Running test file: {test_file}")
-                    result = qa_core.run_tests("unit", test_file=test_file)
+                    result = core.run_tests("unit", test_file=test_file)
                     if result and result[0].get("status") == "fail":
                         error_msg = result[0].get("error", "Unknown error")
                         raise Exception(f"Test failed: {error_msg}")
@@ -384,7 +418,7 @@ def show_run_tests():
                     e2e_urls.append(url)
                     config["e2e_tests"] = e2e_urls
                     save_config(config)
-                result = qa_core.run_tests("e2e", url=url)
+                result = core.run_tests("e2e", url=url)
                 if result and any(r.get("status") == "fail" for r in result):
                     error_msg = next((r.get("error") for r in result if r.get("status") == "fail"), "Unknown error")
                     raise Exception(f"E2E test failed: {error_msg}")
@@ -398,7 +432,7 @@ def show_run_tests():
                 progress_bar.progress(0.25)  # 25% progress
                 for i, test_file in enumerate(selected_tests):
                     status_placeholder.info(f"🔄 Running sample test: {test_file}")
-                    result = qa_core.run_tests("sample", test_file=test_file, test_name=test_name)
+                    result = core.run_tests("sample", test_file=test_file, test_name=test_name)
                     if result and result[0].get("status") == "fail":
                         error_msg = result[0].get("error", "Unknown error")
                         raise Exception(f"Sample test failed: {error_msg}")
@@ -410,7 +444,7 @@ def show_run_tests():
             elif test_type == "custom":
                 status_placeholder.info("🔄 Running custom plugin test...")
                 progress_bar.progress(0.25)  # 25% progress
-                result = qa_core.run_tests("custom", test_name=test_name)
+                result = core.run_tests("custom", test_name=test_name)
                 if result and result[0].get("status") == "fail":
                     error_msg = result[0].get("error", "Unknown error")
                     raise Exception(f"Custom plugin test failed: {error_msg}")
