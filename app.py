@@ -143,7 +143,16 @@ try:
     # Initialize core
     logger.info("Initializing QA core...")
     try:
-        core = QACore(db=db)
+        # Create core with default config path
+        core = QACore(config_path="config.yaml")
+        # Update the database path in core's configuration
+        core.update_config({
+            "database": {
+                "path": db_path
+            }
+        })
+        # Update core's database instance
+        core.db = db
         logger.info("QA core initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize QA core: {str(e)}\n{traceback.format_exc()}")
