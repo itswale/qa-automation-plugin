@@ -17,6 +17,7 @@ from datetime import datetime
 import logging
 import sys
 import tempfile
+import traceback
 
 # Configure logging first, before any other operations
 def setup_logging():
@@ -26,25 +27,27 @@ def setup_logging():
         log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
         os.makedirs(log_dir, exist_ok=True)
         
-        # Configure logging
+        # Configure logging with more detailed format
         log_file = os.path.join(log_dir, 'app.log')
         logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            level=logging.DEBUG,  # Set to DEBUG for more detailed logging
+            format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
             handlers=[
                 logging.FileHandler(log_file),
                 logging.StreamHandler(sys.stdout)
             ]
         )
-        return logging.getLogger(__name__)
+        logger = logging.getLogger(__name__)
+        logger.info("Logging initialized successfully")
+        return logger
     except Exception as e:
         # Fallback to basic logging if setup fails
         logging.basicConfig(
-            level=logging.INFO,
+            level=logging.DEBUG,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[logging.StreamHandler(sys.stdout)]
         )
-        logging.error(f"Failed to setup file logging: {str(e)}")
+        logging.error(f"Failed to setup file logging: {str(e)}\n{traceback.format_exc()}")
         return logging.getLogger(__name__)
 
 # Initialize logger
@@ -52,26 +55,58 @@ logger = setup_logging()
 
 # Initialize components
 try:
-    logger.info("Initializing application components...")
+    logger.info("Starting application initialization...")
+    
+    # Log environment information
+    logger.info(f"Python version: {sys.version}")
+    logger.info(f"Current working directory: {os.getcwd()}")
+    logger.info(f"Environment: {'Cloud' if is_cloud() else 'Local'}")
+    
+    # Initialize database
+    logger.info("Initializing database...")
     db_path = get_database_path()
+    logger.debug(f"Database path: {db_path}")
     db = QADatabase(db_path=db_path)
+    logger.info("Database initialized successfully")
+    
+    # Initialize core
+    logger.info("Initializing QA core...")
     core = QACore(db=db)
+    logger.info("QA core initialized successfully")
+    
+    # Initialize reporter
+    logger.info("Initializing reporter...")
     reporter = JSONReporter()
-    logger.info("Application components initialized successfully")
+    logger.info("Reporter initialized successfully")
+    
+    logger.info("All application components initialized successfully")
 except Exception as e:
-    logger.error(f"Error during initialization: {str(e)}")
+    error_msg = f"Error during initialization: {str(e)}\n{traceback.format_exc()}"
+    logger.error(error_msg)
     st.error("Failed to initialize application. Please check the logs for details.")
+    if not is_cloud():  # Only show detailed error in local environment
+        st.error(f"Detailed error: {str(e)}")
     st.stop()
 
 # --- Cloud Detection and Playwright Install ---
 def is_cloud():
     """Check if running in Streamlit Cloud environment."""
     try:
+        # Log all environment variables for debugging
+        logger.debug("Environment variables:")
+        for var in ['STREAMLIT_SERVER_PORT', 'STREAMLIT_SERVER_HEADLESS', 
+                   'STREAMLIT_SERVER_ENABLE_STATIC_SERVING', 'HOME', 
+                   'STREAMLIT_CLOUD']:
+            logger.debug(f"{var}: {os.getenv(var)}")
+        
         # Check for Streamlit Cloud specific environment variables
-        cloud_env_vars = ['STREAMLIT_SERVER_PORT', 'STREAMLIT_SERVER_HEADLESS', 'STREAMLIT_SERVER_ENABLE_STATIC_SERVING']
-        return any(os.getenv(var) for var in cloud_env_vars)
+        cloud_env_vars = ['STREAMLIT_SERVER_PORT', 'STREAMLIT_SERVER_HEADLESS', 
+                         'STREAMLIT_SERVER_ENABLE_STATIC_SERVING']
+        is_cloud_env = any(os.getenv(var) for var in cloud_env_vars)
+        logger.info(f"Cloud environment detected: {is_cloud_env}")
+        return is_cloud_env
     except Exception as e:
-        logger.warning(f"Error checking cloud environment: {str(e)}")
+        logger.error(f"Error checking cloud environment: {str(e)}\n{traceback.format_exc()}")
         return False
 
 def install_playwright_browsers_if_cloud():
@@ -124,15 +159,29 @@ def get_database_path():
         if is_cloud():
             # In cloud environment, use a path in the temporary directory
             temp_dir = tempfile.gettempdir()
+            logger.debug(f"Using temp directory: {temp_dir}")
             db_path = os.path.join(temp_dir, 'qa_results.db')
             logger.info(f"Using cloud database path: {db_path}")
+            
+            # Verify directory permissions
+            if not os.access(temp_dir, os.W_OK):
+                logger.error(f"Temp directory is not writable: {temp_dir}")
+                raise PermissionError(f"Temp directory is not writable: {temp_dir}")
         else:
             # In local environment, use a path in the project directory
             db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'qa_results.db')
             logger.info(f"Using local database path: {db_path}")
+            
+            # Ensure directory exists and is writable
+            db_dir = os.path.dirname(db_path)
+            os.makedirs(db_dir, exist_ok=True)
+            if not os.access(db_dir, os.W_OK):
+                logger.error(f"Database directory is not writable: {db_dir}")
+                raise PermissionError(f"Database directory is not writable: {db_dir}")
+        
         return db_path
     except Exception as e:
-        logger.error(f"Error getting database path: {str(e)}")
+        logger.error(f"Error getting database path: {str(e)}\n{traceback.format_exc()}")
         # Fallback to a default path
         return 'qa_results.db'
 
