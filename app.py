@@ -17,20 +17,36 @@ from datetime import datetime
 import logging
 
 # Initialize components
-qa_core = QACore()
-db = QADatabase()
-json_reporter = JSONReporter()
+try:
+    # Get database path based on environment
+    db_path = get_database_path()
+    logger.info(f"Initializing database at: {db_path}")
+    
+    # Initialize components with proper error handling
+    qa_core = QACore()
+    db = QADatabase(db_path=db_path)
+    json_reporter = JSONReporter()
+    
+    # Log successful initialization
+    logger.info("Successfully initialized all components")
+except Exception as e:
+    logger.error(f"Error during initialization: {str(e)}")
+    st.error(f"Application initialization failed: {str(e)}")
+    st.stop()
 
 # --- Cloud Detection and Playwright Install ---
 def is_cloud():
-    return os.environ.get("HOME", "") == "/home/appuser"
+    return os.environ.get("HOME", "") == "/home/appuser" or os.environ.get('STREAMLIT_CLOUD', 'false').lower() == 'true'
 
 def install_playwright_browsers_if_cloud():
     if is_cloud():
         try:
+            logger.info("Installing Playwright browsers for cloud environment")
             subprocess.run(["playwright", "install", "chromium"], check=True)
+            logger.info("Successfully installed Playwright browsers")
         except Exception as e:
-            print("Playwright browser install failed:", e)
+            logger.error(f"Playwright browser install failed: {str(e)}")
+            st.error("Failed to install required browsers. Some features may not work.")
 
 install_playwright_browsers_if_cloud()
 
@@ -42,7 +58,6 @@ def is_cloud_environment():
 def get_base_url():
     """Get the base URL for the Streamlit app."""
     if is_cloud_environment():
-        # In cloud, we don't need to open browser windows
         return None
     return f"http://localhost:{st.get_option('server.port')}"
 
@@ -69,10 +84,23 @@ def navigate_to(page, params=None):
 # --- Database Configuration ---
 def get_database_path():
     """Get the appropriate database path based on environment."""
-    if is_cloud_environment():
-        # In cloud, use a temporary directory
-        return os.path.join(os.environ.get('STREAMLIT_TEMP_DIR', '/tmp'), 'qa_results.db')
-    return 'qa_results.db'
+    try:
+        if is_cloud_environment():
+            # In cloud, use a temporary directory
+            temp_dir = os.environ.get('STREAMLIT_TEMP_DIR', '/tmp')
+            db_path = os.path.join(temp_dir, 'qa_results.db')
+            logger.info(f"Using cloud database path: {db_path}")
+            
+            # Ensure the directory exists and is writable
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+            if not os.access(os.path.dirname(db_path), os.W_OK):
+                raise PermissionError(f"Database directory is not writable: {os.path.dirname(db_path)}")
+            
+            return db_path
+        return 'qa_results.db'
+    except Exception as e:
+        logger.error(f"Error getting database path: {str(e)}")
+        raise
 
 # Update database path
 db.db_path = get_database_path()
@@ -105,74 +133,80 @@ def save_config(config):
 
 # --- Main UI ---
 def main():
-    # Set page config for consistent layout
-    st.set_page_config(
-        page_title="QA Automation Dashboard",
-        page_icon="🧪",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    # Add cloud environment indicator
-    if is_cloud_environment():
-        st.sidebar.info("🌐 Running in Streamlit Cloud")
-    
-    st.title("QA Automation Dashboard")
-    
-    # Initialize session state
-    if "results" not in st.session_state:
-        update_results_state()
-    if "test_running" not in st.session_state:
-        st.session_state["test_running"] = False
-    if "last_test_status" not in st.session_state:
-        st.session_state["last_test_status"] = None
-    if "serve_report" not in st.session_state:
-        st.session_state["serve_report"] = False
-    if "current_page" not in st.session_state:
-        st.session_state["current_page"] = "run"
-    if "cloud_environment" not in st.session_state:
-        st.session_state["cloud_environment"] = is_cloud_environment()
-
-    # Sidebar - Always show this
-    with st.sidebar:
-        st.title("Navigation")
-        page = st.radio(
-            "Go to",
-            ["Run Tests", "Reports", "Test History", "Configuration"],
-            key="nav_radio"
+    try:
+        # Set page config for consistent layout
+        st.set_page_config(
+            page_title="QA Automation Dashboard",
+            page_icon="🧪",
+            layout="wide",
+            initial_sidebar_state="expanded"
         )
         
-        # Update current page in session state
-        page_map = {
-            "Run Tests": "run",
-            "Reports": "reports",
-            "Test History": "history",
-            "Configuration": "config"
-        }
-        st.session_state["current_page"] = page_map[page]
+        # Add cloud environment indicator
+        if is_cloud_environment():
+            st.sidebar.info("🌐 Running in Streamlit Cloud")
+            logger.info("Running in Streamlit Cloud environment")
         
-        # Add some spacing and a divider
-        st.markdown("---")
-        st.markdown("### Quick Actions")
-        if st.button("🔄 Refresh Results", key="refresh_sidebar"):
+        st.title("QA Automation Dashboard")
+        
+        # Initialize session state
+        if "results" not in st.session_state:
             update_results_state()
-            st.rerun()
-    
-    # Handle page routing
-    current_page = st.session_state["current_page"]
-    
-    # Update query params to match current page
-    st.query_params["page"] = current_page
-    
-    # Show appropriate page content
-    if current_page == "reports":
-        show_reports_page()
-    elif current_page == "history":
-        show_history_page()
-    elif current_page == "run":
-        show_run_tests()
-    else:
-        show_configuration()
+        if "test_running" not in st.session_state:
+            st.session_state["test_running"] = False
+        if "last_test_status" not in st.session_state:
+            st.session_state["last_test_status"] = None
+        if "serve_report" not in st.session_state:
+            st.session_state["serve_report"] = False
+        if "current_page" not in st.session_state:
+            st.session_state["current_page"] = "run"
+        if "cloud_environment" not in st.session_state:
+            st.session_state["cloud_environment"] = is_cloud_environment()
+
+        # Sidebar - Always show this
+        with st.sidebar:
+            st.title("Navigation")
+            page = st.radio(
+                "Go to",
+                ["Run Tests", "Reports", "Test History", "Configuration"],
+                key="nav_radio"
+            )
+            
+            # Update current page in session state
+            page_map = {
+                "Run Tests": "run",
+                "Reports": "reports",
+                "Test History": "history",
+                "Configuration": "config"
+            }
+            st.session_state["current_page"] = page_map[page]
+            
+            # Add some spacing and a divider
+            st.markdown("---")
+            st.markdown("### Quick Actions")
+            if st.button("🔄 Refresh Results", key="refresh_sidebar"):
+                update_results_state()
+                st.rerun()
+        
+        # Handle page routing
+        current_page = st.session_state["current_page"]
+        
+        # Update query params to match current page
+        st.query_params["page"] = current_page
+        
+        # Show appropriate page content
+        if current_page == "reports":
+            show_reports_page()
+        elif current_page == "history":
+            show_history_page()
+        elif current_page == "run":
+            show_run_tests()
+        else:
+            show_configuration()
+    except Exception as e:
+        logger.error(f"Error in main(): {str(e)}")
+        st.error(f"Application encountered an error: {str(e)}")
+        st.stop()
 
 # --- Dashboard ---
 def show_dashboard():

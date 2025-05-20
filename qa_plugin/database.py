@@ -38,30 +38,56 @@ class QADatabase:
     
     def __init__(self, db_path='qa_results.db'):
         """Initialize database connection."""
-        self.db_path = db_path
-        self._ensure_db_directory()
-        self.engine = create_engine(f'sqlite:///{self.db_path}')
-        self.Session = scoped_session(sessionmaker(bind=self.engine))
-        self._init_db()
+        try:
+            self.db_path = db_path
+            logger.info(f"Initializing database at: {self.db_path}")
+            
+            # Ensure database directory exists and is writable
+            self._ensure_db_directory()
+            
+            # Create engine with proper error handling
+            try:
+                self.engine = create_engine(f'sqlite:///{self.db_path}')
+                self.Session = scoped_session(sessionmaker(bind=self.engine))
+                self._init_db()
+                logger.info("Database initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to create database engine: {str(e)}")
+                raise
+        except Exception as e:
+            logger.error(f"Database initialization failed: {str(e)}")
+            raise
     
     def _ensure_db_directory(self):
-        """Ensure the database directory exists."""
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            try:
-                os.makedirs(db_dir)
-                logger.info(f"Created database directory: {db_dir}")
-            except Exception as e:
-                logger.error(f"Error creating database directory: {e}")
-                raise
+        """Ensure the database directory exists and is writable."""
+        try:
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir:
+                if not os.path.exists(db_dir):
+                    logger.info(f"Creating database directory: {db_dir}")
+                    os.makedirs(db_dir, exist_ok=True)
+                
+                # Check if directory is writable
+                if not os.access(db_dir, os.W_OK):
+                    raise PermissionError(f"Database directory is not writable: {db_dir}")
+                
+                logger.info(f"Database directory verified: {db_dir}")
+        except Exception as e:
+            logger.error(f"Error ensuring database directory: {str(e)}")
+            raise
     
     def _init_db(self):
         """Initialize database tables."""
         try:
+            # Test database connection
+            with self.engine.connect() as conn:
+                conn.execute("SELECT 1")
+            
+            # Create tables
             Base.metadata.create_all(self.engine)
-            logger.info("Database initialized successfully")
+            logger.info("Database tables created successfully")
         except Exception as e:
-            logger.error(f"Error initializing database: {e}")
+            logger.error(f"Error initializing database tables: {str(e)}")
             raise
     
     def get_results(self, limit=None):
@@ -71,9 +97,11 @@ class QADatabase:
             query = session.query(TestResult).order_by(TestResult.timestamp.desc())
             if limit:
                 query = query.limit(limit)
-            return query.all()
+            results = query.all()
+            logger.info(f"Retrieved {len(results)} test results")
+            return results
         except Exception as e:
-            logger.error(f"Error fetching results: {e}")
+            logger.error(f"Error fetching results: {str(e)}")
             raise
         finally:
             session.close()
