@@ -5,3 +5,5 @@ sqlalchemy>=2.0.0
 pyyaml>=6.0.1
 pandas>=2.2.0
 watchdog>=4.0.0
+pytest-html>=4.1.1
+pytest-xdist>=3.5.0

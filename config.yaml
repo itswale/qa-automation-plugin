@@ -1,4 +1,5 @@
-database: sqlite:///qa_plugin.db
+database:
+  path: /Users/mrbbt/Documents/qa-automation-plugin/qa_results.db
 e2e_tests:
 - https://example.com
 plugins:

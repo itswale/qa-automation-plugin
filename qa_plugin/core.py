@@ -304,7 +304,7 @@ class QACore:
         else:
             test_dir = os.path.join('tests', 'unit')  # Always use tests/unit for unit tests
         
-        args = ['--alluredir', 'allure-results']
+        args = ['-v', '--tb=short']  # Use verbose output and short traceback
         if test_file:
             test_path = os.path.join(test_dir, test_file)
             if not os.path.exists(test_path):
@@ -317,14 +317,45 @@ class QACore:
             args = [test_dir] + args
 
         try:
-            exit_code = pytest.main(args)
+            # Capture test output
+            import io
+            from contextlib import redirect_stdout
+            f = io.StringIO()
+            with redirect_stdout(f):
+                exit_code = pytest.main(args)
+            test_output = f.getvalue()
+            
             status = "pass" if exit_code == 0 else "fail"
-            self.db.add_result(test_type="unit", status=status, test_name=test_file or "all_unit_tests", duration=0.0)
-            return [{"type": "unit", "status": status, "name": test_file or "all_unit_tests"}]
+            result = {
+                "type": "unit",
+                "status": status,
+                "name": test_file or "all_unit_tests",
+                "output": test_output
+            }
+            
+            # Save test output to database
+            self.db.add_result(
+                test_type="unit",
+                status=status,
+                test_name=test_file or "all_unit_tests",
+                duration=0.0,
+                error_message=None if status == "pass" else test_output
+            )
+            return [result]
         except Exception as e:
-            error_result = {"type": "unit", "status": "fail", "name": test_file or "all_unit_tests",
-                          "error": str(e)}
-            self.db.add_result(test_type="unit", status="fail", test_name=test_file or "all_unit_tests", duration=0.0)
+            error_result = {
+                "type": "unit",
+                "status": "fail",
+                "name": test_file or "all_unit_tests",
+                "error": str(e)
+            }
+            self.db.add_result(
+                test_type="unit",
+                status="fail",
+                test_name=test_file or "all_unit_tests",
+                duration=0.0,
+                error_message=str(e)
+            )
             return [error_result]
 
     def run_playwright(self, url=None):
