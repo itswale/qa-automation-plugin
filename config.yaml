@@ -1,0 +1,6 @@
+database: sqlite:///qa_plugin.db
+e2e_tests:
+- https://example.com
+plugins:
+  custom: qa_plugin.CustomPlugin
+test_dir: tests
