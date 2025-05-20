@@ -14,6 +14,7 @@ import webbrowser
 from urllib.parse import urljoin
 import subprocess
 from datetime import datetime
+import logging
 
 # Initialize components
 qa_core = QACore()
@@ -834,6 +835,22 @@ def show_history_page():
     except Exception as e:
         st.error(f"Error retrieving test history: {str(e)}")
         st.info("💡 Try refreshing the results or check the database connection.")
+
+# --- Session State Helpers ---
+def get_results():
+    """Retrieve test results from the database (or return an empty list if not available)."""
+    try:
+        return db.get_results()
+    except Exception as e:
+        logger.warning("Unable to retrieve results (database or directory not available): " + str(e))
+        return []
+
+
+def update_results_state():
+    """Update session state with test results (or an empty list if none available)."""
+    st.session_state["results"] = get_results()
+
+# --- (End Session State Helpers) ---
 
 if __name__ == "__main__":
     main()
