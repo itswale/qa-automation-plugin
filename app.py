@@ -18,6 +18,7 @@ import logging
 import sys
 import tempfile
 import traceback
+import time
 
 # Configure logging first, before any other operations
 def setup_logging():
@@ -115,22 +116,47 @@ try:
     logger.info(f"Current working directory: {os.getcwd()}")
     logger.info(f"Environment: {'Cloud' if is_cloud() else 'Local'}")
     
-    # Initialize database
+    # Initialize database with retry logic
     logger.info("Initializing database...")
-    db_path = get_database_path()
-    logger.debug(f"Database path: {db_path}")
-    db = QADatabase(db_path=db_path)
-    logger.info("Database initialized successfully")
+    max_retries = 3
+    retry_count = 0
+    last_error = None
+    
+    while retry_count < max_retries:
+        try:
+            db_path = get_database_path()
+            logger.debug(f"Database path: {db_path}")
+            db = QADatabase(db_path=db_path)
+            logger.info("Database initialized successfully")
+            break
+        except Exception as e:
+            last_error = e
+            retry_count += 1
+            logger.warning(f"Database initialization attempt {retry_count} failed: {str(e)}")
+            if retry_count < max_retries:
+                logger.info(f"Retrying database initialization in 2 seconds...")
+                time.sleep(2)
+            else:
+                logger.error(f"Failed to initialize database after {max_retries} attempts")
+                raise Exception(f"Database initialization failed: {str(last_error)}")
     
     # Initialize core
     logger.info("Initializing QA core...")
-    core = QACore(db=db)
-    logger.info("QA core initialized successfully")
+    try:
+        core = QACore(db=db)
+        logger.info("QA core initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize QA core: {str(e)}\n{traceback.format_exc()}")
+        raise Exception(f"QA core initialization failed: {str(e)}")
     
     # Initialize reporter
     logger.info("Initializing reporter...")
-    reporter = JSONReporter()
-    logger.info("Reporter initialized successfully")
+    try:
+        reporter = JSONReporter()
+        logger.info("Reporter initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize reporter: {str(e)}\n{traceback.format_exc()}")
+        raise Exception(f"Reporter initialization failed: {str(e)}")
     
     logger.info("All application components initialized successfully")
 except Exception as e:

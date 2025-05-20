@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker, scoped_session
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 import logging
+import traceback
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -79,15 +80,17 @@ class QADatabase:
     def _init_db(self):
         """Initialize database tables."""
         try:
-            # Test database connection
+            # Test database connection using SQLAlchemy text()
+            from sqlalchemy import text
             with self.engine.connect() as conn:
-                conn.execute("SELECT 1")
+                conn.execute(text("SELECT 1"))
+                conn.commit()
             
             # Create tables
             Base.metadata.create_all(self.engine)
             logger.info("Database tables created successfully")
         except Exception as e:
-            logger.error(f"Error initializing database tables: {str(e)}")
+            logger.error(f"Error initializing database tables: {str(e)}\n{traceback.format_exc()}")
             raise
     
     def get_results(self, limit=None):
@@ -101,7 +104,7 @@ class QADatabase:
             logger.info(f"Retrieved {len(results)} test results")
             return results
         except Exception as e:
-            logger.error(f"Error fetching results: {str(e)}")
+            logger.error(f"Error fetching results: {str(e)}\n{traceback.format_exc()}")
             raise
         finally:
             session.close()
