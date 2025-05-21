@@ -9,8 +9,6 @@ import tempfile
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
-import allure
-from allure_commons.types import AttachmentType
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -63,73 +61,6 @@ class JSONReporter(BaseReporter):
             return filepath
         except Exception as e:
             logger.error(f"Error saving JSON report: {e}")
-            raise
-
-class AllureReporter(BaseReporter):
-    """Allure reporter for test results."""
-    
-    def __init__(self, output_dir: str = "allure-results"):
-        """Initialize Allure reporter."""
-        super().__init__(output_dir)
-    
-    def save_report(self, test_result: Dict[str, Any]) -> str:
-        """Save test result using Allure framework."""
-        try:
-            # Create test result directory
-            test_dir = os.path.join(self.output_dir, f"{test_result['test_type']}_{test_result['test_name']}")
-            os.makedirs(test_dir, exist_ok=True)
-            
-            # Create Allure result
-            with allure.step("Test Execution"):
-                # Add test details
-                allure.dynamic.title(test_result['test_name'])
-                allure.dynamic.description(f"Test Type: {test_result['test_type']}")
-                
-                # Add test parameters
-                if "parameters" in test_result:
-                    for param_name, param_value in test_result["parameters"].items():
-                        allure.dynamic.parameter(param_name, param_value)
-                
-                # Add test status
-                if test_result["status"] == "passed":
-                    allure.dynamic.severity(allure.severity_level.NORMAL)
-                else:
-                    allure.dynamic.severity(allure.severity_level.CRITICAL)
-                
-                # Add error message if test failed
-                if test_result["status"] == "failed" and "error_message" in test_result:
-                    allure.attach(
-                        test_result["error_message"],
-                        name="Error Message",
-                        attachment_type=AttachmentType.TEXT
-                    )
-                
-                # Add test duration
-                if "duration" in test_result:
-                    allure.dynamic.description_html(
-                        f"<p>Duration: {test_result['duration']:.2f} seconds</p>"
-                    )
-                
-                # Add additional attachments
-                if "attachments" in test_result:
-                    for name, content in test_result["attachments"].items():
-                        if isinstance(content, str):
-                            allure.attach(
-                                content,
-                                name=name,
-                                attachment_type=AttachmentType.TEXT
-                            )
-                        elif isinstance(content, bytes):
-                            allure.attach(
-                                content,
-                                name=name,
-                                attachment_type=AttachmentType.BINARY
-                            )
-            
-            logger.info(f"Saved Allure report in: {test_dir}")
-            return test_dir
-        except Exception as e:
-            logger.error(f"Error saving Allure report: {e}")
             raise
 
 class HTMLReporter(BaseReporter):
@@ -298,10 +229,6 @@ class ReportManager:
         if reporting_config.get("json", True):
             reporters["json"] = JSONReporter(os.path.join(base_dir, "reports"))
         
-        # Initialize Allure reporter if enabled
-        if reporting_config.get("allure", True):
-            reporters["allure"] = AllureReporter(os.path.join(base_dir, "allure-results"))
-        
         # Initialize HTML reporter if enabled
         if reporting_config.get("html", True):
             reporters["html"] = HTMLReporter(os.path.join(base_dir, "reports"))
@@ -349,8 +276,6 @@ class ReportManager:
         for reporter_name, reporter in self.reporters.items():
             if isinstance(reporter, JSONReporter):
                 paths["json"] = os.path.join(reporter.output_dir, f"{test_type}_{test_name}.json")
-            elif isinstance(reporter, AllureReporter):
-                paths["allure"] = os.path.join(reporter.output_dir, f"{test_type}_{test_name}")
             elif isinstance(reporter, HTMLReporter):
                 paths["html"] = os.path.join(reporter.output_dir, f"{test_type}_{test_name}.html")
         return paths
